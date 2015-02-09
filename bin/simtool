@@ -1,0 +1,60 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'commander/import'
+
+PHOTO_EXTENSIONS = ['.jpg', '.jpeg', '.tiff', '.png']
+
+program :version, '0.0.1'
+program :description, "Import photos to iOS simulator.\n\nThe photos are added to the iOS simulator that is currently running."
+
+command :add do |c|
+  c.syntax = 'simtool add [options]'
+  c.summary = 'Import photos to iOS simulator'
+  c.description = "Import photos to iOS simulator.\n\nThe photos are added to the iOS simulator that is currently running."
+  c.example 'Add a single photo', '$ simtool add -p ~/Desktop/a-photo.jpg'
+  c.example 'Add every photo in a folder', '$ simtool add -p ~/Desktop/important-photos'
+  c.option '-p', '--photos PHOTOS_PATH', 'Directory containing the photos to be imported or a path representing a single photo'
+  c.action do |args, options|
+    say_error 'Specify the directory containing the photos with -p' and abort if options.photos.nil?
+    cmd = 'xcode-select -p'
+    xcode = `#{cmd}`.chop
+    say "xcode: #{xcode}"
+    say_error "Can't figure out Xcode to use with `#{cmd}`." and abort unless $?.success?
+    simctl = File.join(xcode, 'Platforms/iPhoneSimulator.platform/Developer/usr/bin/simctl')
+    say "simctl: #{simctl}"
+    cmd = "#{simctl} list devices"
+    output = `#{cmd}`
+    say_error "Can't list devices with `#{cmd}`." and abort unless $?.success?
+    lines = output.split("\n")
+    booted = lines.find {|e| e.include? '(Booted)'}
+    say_error 'You must be running the iOS simulator you want to import to.' and abort unless booted
+    match = Regexp.new(/\((.+?)\)/).match(booted)
+    say_error "Can't figure out device_id of simulator" and abort unless match && match.size == 2
+    device_id = match[1]
+    say "device_id: #{device_id}"
+    if PHOTO_EXTENSIONS.any? {|e| options.photos.downcase.end_with? e}
+      photos = [options.photos]
+    else
+      photos = PHOTO_EXTENSIONS.inject([]) {|s, e| s + Dir[File.expand_path(File.join(options.photos, "*#{e}"))]}
+    end
+    count = 0
+    failed_to_import = []
+    photos.each do |e|
+      cmd = "#{simctl} addphoto #{device_id} #{e}"
+      output = `#{cmd}`
+      if $?.success?
+        count += 1
+      else
+        failed_to_import << e
+      end
+    end
+    say_ok "Imported #{count} photo#{count==1? '': 's'} successfully."
+    unless failed_to_import.empty?
+      say_error "Failed to import #{failed_to_import.size} photo#{failed_to_import.size==1? '': 's'}."
+      failed_to_import.each do |e|
+        say_error e
+      end
+    end
+  end
+end
